@@ -118,6 +118,19 @@
                     <div id="ranking-list" class="card-list"></div>
                     <div id="diff-table" class="diff-table-wrap"></div>
                     <div id="fazit-box" class="fazit-card"></div>
+
+                    <div class="forecast-section">
+                        <h2>Forecast</h2>
+                        <p class="subtitle">Was passiert, wenn dein Verbrauch abweicht?</p>
+                        <div class="input-group compact">
+                            <label for="forecast-kwh">Alternativer Jahresverbrauch (kWh)</label>
+                            <input type="number" id="forecast-kwh" placeholder="z.B. 4500" min="0" step="100">
+                        </div>
+                        <div id="forecast-results" style="display:none;">
+                            <div id="forecast-ranking" class="card-list"></div>
+                            <div id="forecast-fazit" class="fazit-card"></div>
+                        </div>
+                    </div>
                 </div>
             </main>
         </div>

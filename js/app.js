@@ -625,12 +625,14 @@ function updateResults() {
         plugins: [annualLinePlugin]
     });
 
-    // Ranking with monthly + yearly cost
+    // Ranking with monthly + yearly cost + Abschlag
     const ranked = providers.map((p, i) => ({
         ...p,
         index: i,
         yearlyCost: calcYearlyCost(p, kwh),
-        monthlyCost: calcMonthlyCost(p, kwh)
+        monthlyCost: calcMonthlyCost(p, kwh),
+        // Abschlag = actual monthly bill (Grundgebühr + Arbeitspreis/Monat, ohne Boni)
+        abschlag: p.baseFee + (kwh / 12) * (p.kwhPrice / 100)
     })).sort((a, b) => a.yearlyCost - b.yearlyCost);
 
     const bestCost = ranked[0].yearlyCost;
@@ -649,6 +651,7 @@ function updateResults() {
                     ${formatEuro(p.monthlyCost)}/Monat · ${formatEuro(p.yearlyCost)}/Jahr
                     ${pos > 0 ? `<br><span class="diff-positive">+${formatEuro(diff)} vs. ${esc(ranked[0].name)}</span>` : ''}
                 </div>
+                <div class="abschlag-info">Voraussichtl. Abschlag: <strong>${formatEuro(p.abschlag)}</strong>/Monat</div>
             </div>
             <div class="ranking-price">${formatEuro(p.monthlyCost)}<br><small style="color:var(--text-secondary);font-weight:400;font-size:0.75rem">/Monat</small></div>
         `;
@@ -703,6 +706,101 @@ function updateResults() {
             <strong>${formatEuro(best.monthlyCost)}/Monat</strong> (${formatEuro(best.yearlyCost)}/Jahr).
             ${best.bonus + best.sonderbonus > 0 ? ` Boni von ${formatEuro(best.bonus + best.sonderbonus)} sind bereits abgezogen.` : ''}
             Füge weitere Anbieter hinzu, um zu vergleichen!
+        `;
+    }
+}
+
+// ============ FORECAST ============
+document.getElementById('forecast-kwh').addEventListener('input', () => updateForecast());
+
+function updateForecast() {
+    const providers = currentComparison ? (currentComparison.data.providers || []) : [];
+    const baseKwh = currentComparison ? (currentComparison.data.kwh || 0) : 0;
+    const forecastKwh = parseFloat(document.getElementById('forecast-kwh').value) || 0;
+    const resultsDiv = document.getElementById('forecast-results');
+
+    if (providers.length < 1 || forecastKwh <= 0 || baseKwh <= 0) {
+        resultsDiv.style.display = 'none';
+        return;
+    }
+    resultsDiv.style.display = '';
+
+    // Base ranking (to compare winner changes)
+    const baseRanked = providers.map((p, i) => ({
+        name: p.name, index: i, yearlyCost: calcYearlyCost(p, baseKwh)
+    })).sort((a, b) => a.yearlyCost - b.yearlyCost);
+    const baseWinner = baseRanked[0].name;
+
+    // Forecast ranking
+    const ranked = providers.map((p, i) => ({
+        ...p,
+        index: i,
+        yearlyCost: calcYearlyCost(p, forecastKwh),
+        monthlyCost: calcMonthlyCost(p, forecastKwh),
+        abschlag: p.baseFee + (forecastKwh / 12) * (p.kwhPrice / 100),
+        baseYearlyCost: calcYearlyCost(p, baseKwh)
+    })).sort((a, b) => a.yearlyCost - b.yearlyCost);
+
+    const forecastWinner = ranked[0].name;
+    const winnerChanged = forecastWinner !== baseWinner;
+    const bestCost = ranked[0].yearlyCost;
+    const kwhDiff = forecastKwh - baseKwh;
+    const kwhDiffSign = kwhDiff > 0 ? '+' : '';
+
+    const rankList = document.getElementById('forecast-ranking');
+    rankList.innerHTML = '';
+    ranked.forEach((p, pos) => {
+        const diff = p.yearlyCost - bestCost;
+        const costChange = p.yearlyCost - p.baseYearlyCost;
+        const changeCls = costChange > 0 ? 'forecast-up' : costChange < 0 ? 'forecast-down' : 'forecast-same';
+        const changeSign = costChange > 0 ? '+' : '';
+        const item = document.createElement('div');
+        item.className = `card ranking-item${pos === 0 ? ' highlight' : ''}`;
+        item.innerHTML = `
+            <div class="ranking-pos">${pos + 1}</div>
+            <div class="ranking-info">
+                <div class="ranking-name">
+                    ${esc(p.name)}
+                    ${pos === 0 && winnerChanged ? '<span class="forecast-winner-change">Neu #1</span>' : ''}
+                </div>
+                <div class="ranking-cost">
+                    ${formatEuro(p.monthlyCost)}/Monat · ${formatEuro(p.yearlyCost)}/Jahr
+                    ${pos > 0 ? `<br><span class="diff-positive">+${formatEuro(diff)} vs. ${esc(ranked[0].name)}</span>` : ''}
+                </div>
+                <div class="forecast-change ${changeCls}">
+                    ${changeSign}${formatEuro(costChange)}/Jahr vs. aktuellem Verbrauch
+                </div>
+                <div class="abschlag-info">Voraussichtl. Abschlag: <strong>${formatEuro(p.abschlag)}</strong>/Monat</div>
+            </div>
+            <div class="ranking-price">${formatEuro(p.monthlyCost)}<br><small style="color:var(--text-secondary);font-weight:400;font-size:0.75rem">/Monat</small></div>
+        `;
+        rankList.appendChild(item);
+    });
+
+    // Forecast Fazit
+    const fazitBox = document.getElementById('forecast-fazit');
+    const best = ranked[0];
+    if (winnerChanged && ranked.length >= 2) {
+        const saving = ranked[1].yearlyCost - best.yearlyCost;
+        fazitBox.innerHTML = `
+            <strong>Achtung:</strong> Bei <strong>${forecastKwh.toLocaleString('de-DE')} kWh</strong>
+            (${kwhDiffSign}${kwhDiff.toLocaleString('de-DE')} kWh) wechselt der günstigste Anbieter!
+            <strong>${esc(best.name)}</strong> wäre dann mit <strong>${formatEuro(best.yearlyCost)}/Jahr</strong>
+            der beste Tarif (statt ${esc(baseWinner)} bei ${baseKwh.toLocaleString('de-DE')} kWh).
+            Ersparnis: <strong>${formatEuro(saving)}/Jahr</strong>.
+        `;
+    } else if (ranked.length >= 2) {
+        fazitBox.innerHTML = `
+            <strong>Forecast:</strong> Bei <strong>${forecastKwh.toLocaleString('de-DE')} kWh</strong>
+            (${kwhDiffSign}${kwhDiff.toLocaleString('de-DE')} kWh) bleibt <strong>${esc(best.name)}</strong>
+            der günstigste Anbieter mit <strong>${formatEuro(best.yearlyCost)}/Jahr</strong>
+            (${formatEuro(best.monthlyCost)}/Monat).
+        `;
+    } else {
+        fazitBox.innerHTML = `
+            <strong>Forecast:</strong> Bei <strong>${forecastKwh.toLocaleString('de-DE')} kWh</strong>
+            kosten dich <strong>${esc(best.name)}</strong> <strong>${formatEuro(best.yearlyCost)}/Jahr</strong>
+            (${formatEuro(best.monthlyCost)}/Monat).
         `;
     }
 }

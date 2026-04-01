@@ -461,6 +461,54 @@ body {
     color: var(--text-secondary);
 }
 
+/* ABSCHLAG */
+.abschlag-info {
+    display: inline-block;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    background: var(--bg);
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    margin-top: 0.2rem;
+}
+
+/* FORECAST */
+.forecast-section {
+    margin-top: 1.5rem;
+    padding-top: 1.25rem;
+    border-top: 2px dashed var(--border);
+}
+.forecast-section h2 {
+    font-size: 1.05rem;
+    margin-bottom: 0.25rem;
+}
+.forecast-section .subtitle {
+    margin-bottom: 0.75rem;
+}
+.forecast-change {
+    font-size: 0.78rem;
+    margin-top: 0.15rem;
+}
+.forecast-up {
+    color: var(--danger);
+}
+.forecast-down {
+    color: var(--success);
+}
+.forecast-same {
+    color: var(--text-secondary);
+}
+.forecast-winner-change {
+    background: var(--warning);
+    color: #fff;
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 0.15rem 0.5rem;
+    border-radius: 999px;
+    margin-left: 0.4rem;
+    text-transform: uppercase;
+}
+
 /* SETTINGS */
 .settings-card {
     background: var(--card);
