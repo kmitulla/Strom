@@ -806,6 +806,34 @@ function updateForecast() {
             (${formatEuro(best.monthlyCost)}/Monat).
         `;
     }
+
+    // Nachzahlung / Rückzahlung
+    const kwhDelta = forecastKwh - baseKwh; // positive = mehr verbraucht, negative = weniger
+    const nachList = document.getElementById('nachzahlung-list');
+    nachList.innerHTML = '';
+
+    // Sort by absolute nachzahlung (least payment / most refund first)
+    const nachRanked = providers.map(p => ({
+        name: p.name,
+        nachzahlung: kwhDelta * (p.kwhPrice / 100) // nur Verbrauchspreis
+    })).sort((a, b) => a.nachzahlung - b.nachzahlung);
+
+    nachRanked.forEach(p => {
+        const isPay = p.nachzahlung > 0;
+        const isZero = p.nachzahlung === 0;
+        const label = isZero ? 'Keine Differenz' : isPay ? 'Nachzahlung' : 'Rückzahlung';
+        const cls = isZero ? '' : isPay ? 'pay' : 'refund';
+        const item = document.createElement('div');
+        item.className = 'card nachzahlung-item';
+        item.innerHTML = `
+            <div class="ranking-info">
+                <div class="ranking-name">${esc(p.name)}</div>
+                <div class="nachzahlung-label ${cls}">${label}</div>
+            </div>
+            <div class="nachzahlung-amount ${cls}">${isPay ? '+' : ''}${formatEuro(p.nachzahlung)}</div>
+        `;
+        nachList.appendChild(item);
+    });
 }
 
 // ============ MODAL CLOSE ============

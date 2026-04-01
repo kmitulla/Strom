@@ -12,7 +12,7 @@
     <link rel="shortcut icon" href="iconimage.png">
     <link rel="manifest" href="manifest.json">
     <title>⚡ Strom-Vergleich</title>
-    <link rel="stylesheet" href="css/style.css?v=3">
+    <link rel="stylesheet" href="css/style.css?v=4">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
@@ -129,6 +129,12 @@
                         <div id="forecast-results" style="display:none;">
                             <div id="forecast-ranking" class="card-list"></div>
                             <div id="forecast-fazit" class="fazit-card"></div>
+
+                            <div class="nachzahlung-section">
+                                <h3>Erwartete Nachzahlung / Rückzahlung</h3>
+                                <p class="subtitle">Differenz zwischen geplantem und tatsächlichem Verbrauch, basierend auf dem Verbrauchspreis.</p>
+                                <div id="nachzahlung-list" class="card-list"></div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -262,6 +268,6 @@
         <div id="toast" class="toast"></div>
     </div>
 
-    <script type="module" src="js/app.js?v=3"></script>
+    <script type="module" src="js/app.js?v=4"></script>
 </body>
 </html>

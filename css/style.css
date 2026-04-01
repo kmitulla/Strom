@@ -509,6 +509,52 @@ body {
     text-transform: uppercase;
 }
 
+/* NACHZAHLUNG */
+.nachzahlung-section {
+    margin-top: 1.25rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+}
+.nachzahlung-section h3 {
+    font-size: 0.95rem;
+    margin-bottom: 0.25rem;
+}
+.nachzahlung-section .subtitle {
+    margin-bottom: 0.75rem;
+    font-size: 0.82rem;
+}
+.nachzahlung-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+}
+.nachzahlung-amount {
+    font-weight: 700;
+    font-size: 1.1rem;
+    text-align: right;
+    white-space: nowrap;
+}
+.nachzahlung-amount.pay {
+    color: var(--danger);
+}
+.nachzahlung-amount.refund {
+    color: var(--success);
+}
+.nachzahlung-label {
+    font-size: 0.78rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin-top: 0.1rem;
+}
+.nachzahlung-label.pay {
+    color: var(--danger);
+}
+.nachzahlung-label.refund {
+    color: var(--success);
+}
+
 /* SETTINGS */
 .settings-card {
     background: var(--card);
