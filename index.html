@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>⚡ Strom-Vergleich</title>
+    <link rel="stylesheet" href="css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <div id="app">
+        <!-- LOGIN SCREEN -->
+        <div id="login-screen" class="screen active">
+            <div class="login-container">
+                <div class="login-logo">⚡</div>
+                <h1 class="login-title">Strom-Vergleich</h1>
+                <form id="login-form" autocomplete="off">
+                    <div class="input-group">
+                        <label for="login-user">Benutzername</label>
+                        <input type="text" id="login-user" placeholder="Benutzername eingeben" autocomplete="username" required>
+                    </div>
+                    <div class="input-group">
+                        <label for="login-pass">Passwort</label>
+                        <input type="password" id="login-pass" placeholder="Passwort eingeben" autocomplete="current-password">
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-full">Anmelden</button>
+                    <p id="login-error" class="error-text"></p>
+                </form>
+            </div>
+        </div>
+
+        <!-- SET PASSWORD SCREEN (first login) -->
+        <div id="setpw-screen" class="screen">
+            <div class="login-container">
+                <div class="login-logo">🔑</div>
+                <h1 class="login-title">Passwort festlegen</h1>
+                <p class="subtitle">Willkommen! Bitte lege dein Passwort fest.</p>
+                <form id="setpw-form" autocomplete="off">
+                    <div class="input-group">
+                        <label for="setpw-new">Neues Passwort</label>
+                        <input type="password" id="setpw-new" placeholder="Neues Passwort" autocomplete="new-password">
+                    </div>
+                    <div class="input-group">
+                        <label for="setpw-confirm">Passwort bestätigen</label>
+                        <input type="password" id="setpw-confirm" placeholder="Passwort bestätigen" autocomplete="new-password">
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-full">Passwort speichern</button>
+                    <p id="setpw-error" class="error-text"></p>
+                </form>
+            </div>
+        </div>
+
+        <!-- MAIN DASHBOARD -->
+        <div id="dashboard-screen" class="screen">
+            <header class="app-header">
+                <h1>⚡ Strom-Vergleich</h1>
+                <div class="header-actions">
+                    <button id="btn-admin" class="btn btn-icon" title="Admin" style="display:none;">👤</button>
+                    <button id="btn-settings" class="btn btn-icon" title="Einstellungen">⚙️</button>
+                </div>
+            </header>
+            <main class="content">
+                <div class="section-header">
+                    <h2>Meine Vergleiche</h2>
+                    <button id="btn-new-comparison" class="btn btn-primary btn-sm">+ Neu</button>
+                </div>
+                <div id="comparisons-list" class="card-list">
+                    <p class="empty-state">Noch keine Vergleiche vorhanden.<br>Erstelle deinen ersten Stromvergleich!</p>
+                </div>
+            </main>
+        </div>
+
+        <!-- COMPARISON DETAIL -->
+        <div id="comparison-screen" class="screen">
+            <header class="app-header">
+                <button id="btn-back-dashboard" class="btn btn-icon">←</button>
+                <h1 id="comparison-title">Vergleich</h1>
+                <div class="header-actions">
+                    <button id="btn-edit-comparison" class="btn btn-icon" title="Bearbeiten">✏️</button>
+                    <button id="btn-delete-comparison" class="btn btn-icon btn-danger-icon" title="Löschen">🗑️</button>
+                </div>
+            </header>
+            <main class="content">
+                <div class="input-group compact">
+                    <label for="kwh-input">Jährlicher Stromverbrauch (kWh)</label>
+                    <input type="number" id="kwh-input" placeholder="z.B. 3500" min="0" step="100">
+                </div>
+
+                <div class="section-header">
+                    <h2>Anbieter</h2>
+                    <button id="btn-add-provider" class="btn btn-primary btn-sm">+ Anbieter</button>
+                </div>
+                <div id="providers-list" class="card-list"></div>
+
+                <div id="results-section" style="display:none;">
+                    <h2>Ergebnis</h2>
+                    <div class="chart-container">
+                        <canvas id="breakeven-chart"></canvas>
+                    </div>
+                    <div id="ranking-list" class="card-list"></div>
+                    <div id="fazit-box" class="fazit-card"></div>
+                </div>
+            </main>
+        </div>
+
+        <!-- ADD/EDIT PROVIDER MODAL -->
+        <div id="provider-modal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 id="provider-modal-title">Anbieter hinzufügen</h2>
+                    <button class="btn btn-icon modal-close" data-modal="provider-modal">✕</button>
+                </div>
+                <form id="provider-form">
+                    <div class="input-group">
+                        <label for="provider-name">Anbietername</label>
+                        <input type="text" id="provider-name" placeholder="z.B. Vattenfall" required>
+                    </div>
+                    <div class="input-group">
+                        <label for="provider-kwh-price">Verbrauchspreis (Cent/kWh)</label>
+                        <input type="number" id="provider-kwh-price" placeholder="z.B. 29.5" step="0.01" min="0" required>
+                    </div>
+                    <div class="input-group">
+                        <label for="provider-base-fee">Monatliche Grundgebühr (€)</label>
+                        <input type="number" id="provider-base-fee" placeholder="z.B. 12.50" step="0.01" min="0" required>
+                    </div>
+                    <div class="input-group">
+                        <label for="provider-bonus">Neukundenbonus (€, einmalig)</label>
+                        <input type="number" id="provider-bonus" placeholder="z.B. 50" step="0.01" min="0" value="0">
+                    </div>
+                    <div class="input-group">
+                        <label for="provider-sonderbonus">Sonderbonus (€, einmalig)</label>
+                        <input type="number" id="provider-sonderbonus" placeholder="z.B. 25" step="0.01" min="0" value="0">
+                    </div>
+                    <input type="hidden" id="provider-edit-index" value="-1">
+                    <button type="submit" class="btn btn-primary btn-full">Speichern</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- NEW/EDIT COMPARISON MODAL -->
+        <div id="comparison-modal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 id="comparison-modal-title">Neuer Vergleich</h2>
+                    <button class="btn btn-icon modal-close" data-modal="comparison-modal">✕</button>
+                </div>
+                <form id="comparison-form">
+                    <div class="input-group">
+                        <label for="comparison-name">Name des Vergleichs</label>
+                        <input type="text" id="comparison-name" placeholder="z.B. Wohnung Berlin 2026" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-full">Speichern</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- SETTINGS SCREEN -->
+        <div id="settings-screen" class="screen">
+            <header class="app-header">
+                <button id="btn-back-settings" class="btn btn-icon">←</button>
+                <h1>Einstellungen</h1>
+                <div class="header-actions"></div>
+            </header>
+            <main class="content">
+                <div class="settings-card">
+                    <h3>Passwort ändern</h3>
+                    <form id="changepw-form">
+                        <div class="input-group">
+                            <label for="changepw-old">Altes Passwort</label>
+                            <input type="password" id="changepw-old" placeholder="Altes Passwort">
+                        </div>
+                        <div class="input-group">
+                            <label for="changepw-new">Neues Passwort</label>
+                            <input type="password" id="changepw-new" placeholder="Neues Passwort">
+                        </div>
+                        <div class="input-group">
+                            <label for="changepw-confirm">Neues Passwort bestätigen</label>
+                            <input type="password" id="changepw-confirm" placeholder="Passwort bestätigen">
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-full">Passwort ändern</button>
+                        <p id="changepw-msg" class="error-text"></p>
+                    </form>
+                </div>
+                <button id="btn-logout" class="btn btn-danger btn-full" style="margin-top:1rem;">Abmelden</button>
+            </main>
+        </div>
+
+        <!-- ADMIN SCREEN -->
+        <div id="admin-screen" class="screen">
+            <header class="app-header">
+                <button id="btn-back-admin" class="btn btn-icon">←</button>
+                <h1>Benutzerverwaltung</h1>
+                <div class="header-actions">
+                    <button id="btn-add-user" class="btn btn-primary btn-sm">+ User</button>
+                </div>
+            </header>
+            <main class="content">
+                <div id="users-list" class="card-list"></div>
+            </main>
+        </div>
+
+        <!-- ADD/EDIT USER MODAL -->
+        <div id="user-modal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 id="user-modal-title">Neuer Benutzer</h2>
+                    <button class="btn btn-icon modal-close" data-modal="user-modal">✕</button>
+                </div>
+                <form id="user-form">
+                    <div class="input-group">
+                        <label for="user-name">Benutzername</label>
+                        <input type="text" id="user-name" placeholder="Benutzername" required>
+                    </div>
+                    <div class="input-group">
+                        <label for="user-pass">Passwort (leer = User legt selbst fest)</label>
+                        <input type="password" id="user-pass" placeholder="Optional">
+                    </div>
+                    <div class="input-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="user-is-admin"> Admin-Rechte
+                        </label>
+                    </div>
+                    <input type="hidden" id="user-edit-id" value="">
+                    <button type="submit" class="btn btn-primary btn-full">Speichern</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- TOAST -->
+        <div id="toast" class="toast"></div>
+    </div>
+
+    <script type="module" src="js/app.js"></script>
+</body>
+</html>
