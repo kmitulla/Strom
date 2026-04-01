@@ -489,29 +489,31 @@ function renderProviders() {
 }
 
 // ============ RESULTS & CHART ============
-function calcMonthlyCost(provider, kwh, month) {
-    // month = 1..12
-    const monthlyKwh = kwh / 12;
-    const consumption = monthlyKwh * (provider.kwhPrice / 100);
-    const base = provider.baseFee;
-    const totalMonthly = consumption + base;
-    const cumulative = totalMonthly * month;
-    // Bonus applied at end of year (month 12)
-    const bonusTotal = provider.bonus + provider.sonderbonus;
-    return { monthly: totalMonthly, cumulative, withBonus: cumulative - bonusTotal };
-}
 
-function calcYearlyCost(provider, kwh) {
-    const consumption = kwh * (provider.kwhPrice / 100);
+// Cost at a given kWh consumption point (cumulative over the year)
+function calcCostAtKwh(provider, consumedKwh) {
+    const consumption = consumedKwh * (provider.kwhPrice / 100);
     const base = provider.baseFee * 12;
     const bonus = provider.bonus + provider.sonderbonus;
     return consumption + base - bonus;
+}
+
+function calcYearlyCost(provider, kwh) {
+    return calcCostAtKwh(provider, kwh);
+}
+
+function calcMonthlyCost(provider, kwh) {
+    return calcYearlyCost(provider, kwh) / 12;
 }
 
 const chartColors = [
     '#3b82f6', '#ef4444', '#22c55e', '#f59e0b', '#8b5cf6',
     '#ec4899', '#06b6d4', '#f97316', '#14b8a6', '#6366f1'
 ];
+
+// Axis config event listeners
+document.getElementById('axis-x-max').addEventListener('input', () => updateResults());
+document.getElementById('axis-y-max').addEventListener('input', () => updateResults());
 
 function updateResults() {
     const providers = currentComparison.data.providers || [];
@@ -524,81 +526,161 @@ function updateResults() {
     }
     section.style.display = '';
 
-    // Chart data: cumulative cost per month (1-12) with bonus applied proportionally
-    const months = Array.from({ length: 12 }, (_, i) => i + 1);
-    const monthLabels = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
+    // X-axis: kWh, with annual consumption at ~2/3 of the axis
+    const autoXMax = Math.ceil(kwh * 1.5 / 100) * 100; // 1.5x = annual at 2/3
+    const userXMax = parseFloat(document.getElementById('axis-x-max').value);
+    const xMax = (userXMax > 0) ? userXMax : autoXMax;
+
+    // Generate data points along kWh axis (0 to xMax, ~30 points)
+    const numPoints = 30;
+    const step = xMax / numPoints;
+    const kwhPoints = Array.from({ length: numPoints + 1 }, (_, i) => Math.round(i * step));
 
     const datasets = providers.map((p, i) => {
-        const data = months.map(m => {
-            const monthlyKwh = kwh / 12;
-            const cumCost = (monthlyKwh * (p.kwhPrice / 100) + p.baseFee) * m;
-            const bonusTotal = p.bonus + p.sonderbonus;
-            // Apply bonus proportionally over the year
-            const bonusApplied = bonusTotal * (m / 12);
-            return Math.round((cumCost - bonusApplied) * 100) / 100;
-        });
+        const data = kwhPoints.map(x => ({
+            x,
+            y: Math.round(calcCostAtKwh(p, x) * 100) / 100
+        }));
         return {
             label: p.name,
             data,
             borderColor: chartColors[i % chartColors.length],
             backgroundColor: chartColors[i % chartColors.length] + '20',
             tension: 0.3,
-            pointRadius: 3,
-            borderWidth: 2,
+            pointRadius: 0,
+            pointHitRadius: 10,
+            borderWidth: 2.5,
             fill: false
         };
     });
+
+    // Y-axis max
+    const autoYMax = Math.max(...providers.map(p => calcCostAtKwh(p, xMax)));
+    const userYMax = parseFloat(document.getElementById('axis-y-max').value);
+    const yMax = (userYMax > 0) ? userYMax : undefined;
+
+    // Vertical annotation line at annual consumption
+    const annualLinePlugin = {
+        id: 'annualLine',
+        afterDraw(chart) {
+            const xScale = chart.scales.x;
+            const yScale = chart.scales.y;
+            const ctx = chart.ctx;
+            const xPixel = xScale.getPixelForValue(kwh);
+            if (xPixel < xScale.left || xPixel > xScale.right) return;
+            ctx.save();
+            ctx.beginPath();
+            ctx.setLineDash([6, 4]);
+            ctx.strokeStyle = '#94a3b8';
+            ctx.lineWidth = 1.5;
+            ctx.moveTo(xPixel, yScale.top);
+            ctx.lineTo(xPixel, yScale.bottom);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillStyle = '#64748b';
+            ctx.font = '11px -apple-system, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(`${kwh.toLocaleString('de-DE')} kWh/Jahr`, xPixel, yScale.top - 6);
+            ctx.restore();
+        }
+    };
 
     // Render chart
     const canvas = document.getElementById('breakeven-chart');
     if (breakEvenChart) breakEvenChart.destroy();
     breakEvenChart = new Chart(canvas, {
-        type: 'line',
-        data: { labels: monthLabels, datasets },
+        type: 'scatter',
+        data: { datasets },
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            showLine: true,
             interaction: { mode: 'index', intersect: false },
             plugins: {
                 legend: { position: 'bottom', labels: { boxWidth: 12, padding: 12, font: { size: 11 } } },
                 tooltip: {
                     callbacks: {
+                        title: ctx => `${ctx[0].parsed.x.toLocaleString('de-DE')} kWh`,
                         label: ctx => `${ctx.dataset.label}: ${formatEuro(ctx.parsed.y)}`
                     }
                 }
             },
+            layout: { padding: { top: 20 } },
             scales: {
                 y: {
-                    title: { display: true, text: 'Kosten (€)', font: { size: 11 } },
-                    ticks: { callback: v => v + ' €' }
+                    title: { display: true, text: 'Jahreskosten (€)', font: { size: 11 } },
+                    ticks: { callback: v => v.toLocaleString('de-DE') + ' €' },
+                    max: yMax,
+                    beginAtZero: false
                 },
-                x: { title: { display: true, text: 'Monat', font: { size: 11 } } }
+                x: {
+                    type: 'linear',
+                    title: { display: true, text: 'Stromverbrauch (kWh)', font: { size: 11 } },
+                    ticks: { callback: v => v.toLocaleString('de-DE') },
+                    max: xMax,
+                    min: 0
+                }
             }
-        }
+        },
+        plugins: [annualLinePlugin]
     });
 
-    // Ranking
+    // Ranking with monthly + yearly cost
     const ranked = providers.map((p, i) => ({
         ...p,
         index: i,
-        yearlyCost: calcYearlyCost(p, kwh)
+        yearlyCost: calcYearlyCost(p, kwh),
+        monthlyCost: calcMonthlyCost(p, kwh)
     })).sort((a, b) => a.yearlyCost - b.yearlyCost);
+
+    const bestCost = ranked[0].yearlyCost;
 
     const rankList = document.getElementById('ranking-list');
     rankList.innerHTML = '';
     ranked.forEach((p, pos) => {
+        const diff = p.yearlyCost - bestCost;
         const item = document.createElement('div');
         item.className = `card ranking-item${pos === 0 ? ' highlight' : ''}`;
         item.innerHTML = `
             <div class="ranking-pos">${pos + 1}</div>
             <div class="ranking-info">
                 <div class="ranking-name">${esc(p.name)}</div>
-                <div class="ranking-cost">${p.kwhPrice} ct/kWh · ${formatEuro(p.baseFee)}/Mon · Bonus: ${formatEuro(p.bonus + p.sonderbonus)}</div>
+                <div class="ranking-cost">
+                    ${formatEuro(p.monthlyCost)}/Monat · ${formatEuro(p.yearlyCost)}/Jahr
+                    ${pos > 0 ? `<br><span class="diff-positive">+${formatEuro(diff)} vs. ${esc(ranked[0].name)}</span>` : ''}
+                </div>
             </div>
-            <div class="ranking-price">${formatEuro(p.yearlyCost)}</div>
+            <div class="ranking-price">${formatEuro(p.monthlyCost)}<br><small style="color:var(--text-secondary);font-weight:400;font-size:0.75rem">/Monat</small></div>
         `;
         rankList.appendChild(item);
     });
+
+    // Diff table: pairwise differences
+    if (ranked.length >= 2) {
+        const diffDiv = document.getElementById('diff-table');
+        let html = '<h3>Preisdifferenz (Jahr)</h3><table class="diff-table"><thead><tr><th>Anbieter</th>';
+        ranked.forEach(p => { html += `<th>${esc(p.name)}</th>`; });
+        html += '</tr></thead><tbody>';
+        ranked.forEach((row, ri) => {
+            html += `<tr><td><strong>${esc(row.name)}</strong></td>`;
+            ranked.forEach((col, ci) => {
+                const diff = row.yearlyCost - col.yearlyCost;
+                if (ri === ci) {
+                    html += `<td class="diff-zero">–</td>`;
+                } else {
+                    const cls = diff > 0 ? 'diff-positive' : 'diff-negative';
+                    const sign = diff > 0 ? '+' : '';
+                    html += `<td class="${cls}">${sign}${formatEuro(diff)}</td>`;
+                }
+            });
+            html += '</tr>';
+        });
+        html += '</tbody></table>';
+        diffDiv.innerHTML = html;
+        diffDiv.style.display = '';
+    } else {
+        document.getElementById('diff-table').style.display = 'none';
+    }
 
     // Fazit
     const fazitBox = document.getElementById('fazit-box');
@@ -606,18 +688,19 @@ function updateResults() {
         const best = ranked[0];
         const second = ranked[1];
         const saving = second.yearlyCost - best.yearlyCost;
-        const monthlyKwhCost = (kwh * (best.kwhPrice / 100) + best.baseFee * 12 - best.bonus - best.sonderbonus) / 12;
         fazitBox.innerHTML = `
             <strong>Fazit:</strong> Bei einem Jahresverbrauch von <strong>${kwh.toLocaleString('de-DE')} kWh</strong>
-            ist <strong>${esc(best.name)}</strong> mit Gesamtkosten von <strong>${formatEuro(best.yearlyCost)}</strong> pro Jahr
-            der günstigste Anbieter. Du sparst <strong>${formatEuro(saving)}</strong> im Vergleich zu ${esc(second.name)}.
+            ist <strong>${esc(best.name)}</strong> mit <strong>${formatEuro(best.monthlyCost)}/Monat</strong>
+            (${formatEuro(best.yearlyCost)}/Jahr) der günstigste Anbieter.
+            Du sparst <strong>${formatEuro(saving)}/Jahr</strong> (${formatEuro(saving / 12)}/Monat) im Vergleich zu ${esc(second.name)}.
             ${best.bonus + best.sonderbonus > 0 ? ` Dabei sind Boni von insgesamt ${formatEuro(best.bonus + best.sonderbonus)} berücksichtigt.` : ''}
         `;
     } else if (ranked.length === 1) {
         const best = ranked[0];
         fazitBox.innerHTML = `
             <strong>Fazit:</strong> Bei einem Jahresverbrauch von <strong>${kwh.toLocaleString('de-DE')} kWh</strong>
-            belaufen sich die jährlichen Kosten bei <strong>${esc(best.name)}</strong> auf <strong>${formatEuro(best.yearlyCost)}</strong>.
+            belaufen sich die Kosten bei <strong>${esc(best.name)}</strong> auf
+            <strong>${formatEuro(best.monthlyCost)}/Monat</strong> (${formatEuro(best.yearlyCost)}/Jahr).
             ${best.bonus + best.sonderbonus > 0 ? ` Boni von ${formatEuro(best.bonus + best.sonderbonus)} sind bereits abgezogen.` : ''}
             Füge weitere Anbieter hinzu, um zu vergleichen!
         `;

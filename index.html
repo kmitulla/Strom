@@ -96,10 +96,21 @@
 
                 <div id="results-section" style="display:none;">
                     <h2>Ergebnis</h2>
+                    <div class="axis-config">
+                        <div class="input-group compact">
+                            <label for="axis-x-max">X-Achse Max (kWh)</label>
+                            <input type="number" id="axis-x-max" placeholder="Auto" min="0" step="100">
+                        </div>
+                        <div class="input-group compact">
+                            <label for="axis-y-max">Y-Achse Max (€)</label>
+                            <input type="number" id="axis-y-max" placeholder="Auto" min="0" step="50">
+                        </div>
+                    </div>
                     <div class="chart-container">
                         <canvas id="breakeven-chart"></canvas>
                     </div>
                     <div id="ranking-list" class="card-list"></div>
+                    <div id="diff-table" class="diff-table-wrap"></div>
                     <div id="fazit-box" class="fazit-card"></div>
                 </div>
             </main>
