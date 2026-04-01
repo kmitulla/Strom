@@ -1,0 +1,17 @@
+{
+    "name": "Strom-Vergleich",
+    "short_name": "Strom",
+    "description": "Stromvergleich-Tool",
+    "start_url": "./index.html",
+    "display": "standalone",
+    "background_color": "#0f172a",
+    "theme_color": "#1e3a5f",
+    "icons": [
+        {
+            "src": "iconimage.png",
+            "sizes": "any",
+            "type": "image/png",
+            "purpose": "any maskable"
+        }
+    ]
+}
