@@ -708,6 +708,9 @@ function updateResults() {
             Füge weitere Anbieter hinzu, um zu vergleichen!
         `;
     }
+
+    // Update forecast if value is entered
+    updateForecast();
 }
 
 // ============ FORECAST ============
