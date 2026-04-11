@@ -25,7 +25,7 @@ let breakEvenChart = null;
 
 // Tracker state
 let trackerReadings = [];
-let trackerContract = null;
+let trackerContracts = [];
 let consumptionChart = null;
 let currentChartPeriod = 'month';
 
@@ -874,9 +874,9 @@ async function updateTrackerCard() {
 }
 
 async function loadTracker() {
-    await Promise.all([loadReadings(), loadContract()]);
+    await Promise.all([loadReadings(), loadContracts()]);
     renderReadings();
-    renderContractInfo();
+    renderContracts();
     renderConsumptionChart();
     updateTrackerKPIs();
     checkCancellationReminder();
@@ -891,15 +891,59 @@ async function loadReadings() {
     trackerReadings.sort((a, b) => a.date.localeCompare(b.date));
 }
 
-async function loadContract() {
+async function loadContracts() {
     const snap = await getDocs(collection(db, `users/${currentUser.userId}/contracts`));
-    trackerContract = null;
+    trackerContracts = [];
     snap.forEach(d => {
-        const data = { id: d.id, ...d.data() };
-        if (!trackerContract || data.createdAt > trackerContract.createdAt) {
-            trackerContract = data;
-        }
+        trackerContracts.push({ id: d.id, ...d.data() });
     });
+    trackerContracts.sort((a, b) => a.startDate.localeCompare(b.startDate));
+}
+
+// Contract helpers
+function getContractForDate(dateStr) {
+    if (trackerContracts.length === 0) return null;
+    const matching = trackerContracts
+        .filter(c => c.startDate <= dateStr && (!c.endDate || c.endDate >= dateStr))
+        .sort((a, b) => b.startDate.localeCompare(a.startDate));
+    return matching[0] || null;
+}
+
+function getActiveContract() {
+    return getContractForDate(new Date().toISOString().slice(0, 10));
+}
+
+function getBonusPerDay(contract) {
+    if (!contract.bonus || !contract.startDate || !contract.endDate) return 0;
+    const days = (new Date(contract.endDate) - new Date(contract.startDate)) / (1000 * 60 * 60 * 24);
+    return days > 0 ? contract.bonus / days : 0;
+}
+
+function calcPeriodCost(consumption, rawLabel, period) {
+    let dateStr;
+    if (period === 'day') dateStr = rawLabel;
+    else if (period === 'month') dateStr = rawLabel + '-15';
+    else dateStr = rawLabel + '-07-01';
+
+    const contract = getContractForDate(dateStr);
+    if (!contract) return null;
+
+    const consumptionCost = consumption * (contract.kwhPrice / 100);
+    const bonusPerDay = getBonusPerDay(contract);
+
+    let baseFee, bonusCredit;
+    if (period === 'day') {
+        baseFee = contract.baseFee / 30.44;
+        bonusCredit = bonusPerDay;
+    } else if (period === 'month') {
+        baseFee = contract.baseFee;
+        bonusCredit = bonusPerDay * 30.44;
+    } else {
+        baseFee = contract.baseFee * 12;
+        bonusCredit = bonusPerDay * 365.25;
+    }
+
+    return Math.max(0, Math.round((consumptionCost + baseFee - bonusCredit) * 100) / 100);
 }
 
 // ============ READINGS CRUD ============
@@ -1001,24 +1045,25 @@ document.getElementById('reading-form').addEventListener('submit', async (e) => 
     updateTrackerKPIs();
 });
 
-// ============ CONTRACT ============
+// ============ CONTRACTS ============
 document.getElementById('btn-contract-settings').addEventListener('click', () => openContractModal());
-document.getElementById('btn-edit-contract').addEventListener('click', () => openContractModal());
+document.getElementById('btn-add-contract').addEventListener('click', () => openContractModal());
 
-function openContractModal() {
-    if (trackerContract) {
+function openContractModal(contract) {
+    if (contract) {
         document.getElementById('contract-modal-title').textContent = 'Vertrag bearbeiten';
-        document.getElementById('contract-name').value = trackerContract.name || '';
-        document.getElementById('contract-start').value = trackerContract.startDate || '';
-        document.getElementById('contract-end').value = trackerContract.endDate || '';
-        document.getElementById('contract-kwh-price').value = trackerContract.kwhPrice || '';
-        document.getElementById('contract-base-fee').value = trackerContract.baseFee || '';
-        document.getElementById('contract-bonus').value = trackerContract.bonus || 0;
-        document.getElementById('contract-cancel-date').value = trackerContract.reminderDate || '';
-        document.getElementById('contract-edit-id').value = trackerContract.id;
+        document.getElementById('contract-name').value = contract.name || '';
+        document.getElementById('contract-start').value = contract.startDate || '';
+        document.getElementById('contract-end').value = contract.endDate || '';
+        document.getElementById('contract-kwh-price').value = contract.kwhPrice || '';
+        document.getElementById('contract-base-fee').value = contract.baseFee || '';
+        document.getElementById('contract-bonus').value = contract.bonus || 0;
+        document.getElementById('contract-cancel-date').value = contract.reminderDate || '';
+        document.getElementById('contract-edit-id').value = contract.id;
     } else {
         document.getElementById('contract-modal-title').textContent = 'Vertrag anlegen';
         document.getElementById('contract-form').reset();
+        document.getElementById('contract-bonus').value = '0';
         document.getElementById('contract-edit-id').value = '';
     }
     showModal('contract-modal');
@@ -1049,33 +1094,67 @@ document.getElementById('contract-form').addEventListener('submit', async (e) =>
     }
 
     hideModal('contract-modal');
-    await loadContract();
-    renderContractInfo();
+    await loadContracts();
+    renderContracts();
     renderConsumptionChart();
     updateTrackerKPIs();
     checkCancellationReminder();
 });
 
-function renderContractInfo() {
-    const details = document.getElementById('contract-details');
+function renderContracts() {
+    const list = document.getElementById('contracts-list');
+    list.innerHTML = '';
 
-    if (!trackerContract) {
-        details.innerHTML = '<p class="card-subtitle">Kein Vertrag hinterlegt. Tippe auf ✏️ um einen anzulegen.</p>';
+    if (trackerContracts.length === 0) {
+        list.innerHTML = '<p class="empty-state">Keine Verträge hinterlegt.<br>Lege deinen ersten Vertrag an!</p>';
         return;
     }
 
-    const c = trackerContract;
-    details.innerHTML = `
-        <div class="contract-details-grid">
-            <span class="contract-label">Anbieter</span><span>${esc(c.name)}</span>
-            <span class="contract-label">Beginn</span><span>${new Date(c.startDate).toLocaleDateString('de-DE')}</span>
-            ${c.endDate ? `<span class="contract-label">Ende</span><span>${new Date(c.endDate).toLocaleDateString('de-DE')}</span>` : ''}
-            <span class="contract-label">Verbrauchspreis</span><span>${c.kwhPrice} ct/kWh</span>
-            <span class="contract-label">Grundgebühr</span><span>${formatEuro(c.baseFee)}/Monat</span>
-            ${c.bonus ? `<span class="contract-label">Bonus</span><span>${formatEuro(c.bonus)} (einmalig)</span>` : ''}
-            ${c.reminderDate ? `<span class="contract-label">Kündigungserinnerung</span><span>${new Date(c.reminderDate).toLocaleDateString('de-DE')}</span>` : ''}
-        </div>
-    `;
+    trackerContracts.forEach(c => {
+        const bonusMonthly = getBonusPerDay(c) * 30.44;
+        const card = document.createElement('div');
+        card.className = 'card reading-card';
+        card.innerHTML = `
+            <div class="reading-info">
+                <div class="card-title">${esc(c.name)}</div>
+                <div class="card-subtitle">
+                    ${new Date(c.startDate).toLocaleDateString('de-DE')} – ${c.endDate ? new Date(c.endDate).toLocaleDateString('de-DE') : 'unbefristet'}
+                    <br>${c.kwhPrice} ct/kWh · ${formatEuro(c.baseFee)}/Monat
+                    ${c.bonus ? ` · Bonus: ${formatEuro(c.bonus)}` : ''}
+                    ${bonusMonthly > 0 ? ` (${formatEuro(bonusMonthly)}/Mo)` : ''}
+                    ${c.reminderDate ? `<br>Kündigung: ${new Date(c.reminderDate).toLocaleDateString('de-DE')}` : ''}
+                </div>
+            </div>
+            <div class="provider-actions">
+                <button class="btn btn-icon" title="Bearbeiten" data-edit-contract="${c.id}">✏️</button>
+                <button class="btn btn-icon btn-danger-icon" title="Löschen" data-delete-contract="${c.id}">🗑️</button>
+            </div>
+        `;
+        list.appendChild(card);
+    });
+
+    list.onclick = async (e) => {
+        const editBtn = e.target.closest('[data-edit-contract]');
+        const delBtn = e.target.closest('[data-delete-contract]');
+
+        if (editBtn) {
+            const id = editBtn.dataset.editContract;
+            const contract = trackerContracts.find(c => c.id === id);
+            if (contract) openContractModal(contract);
+        }
+
+        if (delBtn) {
+            const id = delBtn.dataset.deleteContract;
+            if (!confirm('Vertrag wirklich löschen?')) return;
+            await deleteDoc(doc(db, `users/${currentUser.userId}/contracts`, id));
+            toast('Vertrag gelöscht');
+            await loadContracts();
+            renderContracts();
+            renderConsumptionChart();
+            updateTrackerKPIs();
+            checkCancellationReminder();
+        }
+    };
 }
 
 // ============ CONSUMPTION CHART ============
@@ -1165,7 +1244,7 @@ function renderConsumptionChart() {
     const labels = data.map(d => formatPeriodLabel(d.label, period));
     const values = data.map(d => d.value);
 
-    const showCost = trackerContract && trackerContract.kwhPrice;
+    const showCostBars = document.getElementById('chart-cost-bars').checked && trackerContracts.length > 0;
 
     const datasets = [{
         label: 'Verbrauch (kWh)',
@@ -1180,29 +1259,21 @@ function renderConsumptionChart() {
         yAxisID: 'y'
     }];
 
-    if (showCost) {
-        const costs = values.map(v => {
-            const consumptionCost = v * (trackerContract.kwhPrice / 100);
-            let baseFeePerPeriod = 0;
-            if (period === 'day') baseFeePerPeriod = trackerContract.baseFee / 30.44;
-            else if (period === 'month') baseFeePerPeriod = trackerContract.baseFee;
-            else baseFeePerPeriod = trackerContract.baseFee * 12;
-            return Math.round((consumptionCost + baseFeePerPeriod) * 100) / 100;
-        });
-
-        datasets.push({
-            label: 'Kosten (€)',
-            data: costs,
-            borderColor: '#f59e0b',
-            backgroundColor: 'rgba(245, 158, 11, 0.1)',
-            tension: 0.3,
-            fill: false,
-            pointRadius: data.length > 30 ? 0 : 3,
-            pointHitRadius: 10,
-            borderWidth: 2,
-            borderDash: [5, 3],
-            yAxisID: 'y1'
-        });
+    if (showCostBars) {
+        const costs = data.map((d, i) => calcPeriodCost(d.value, d.label, period));
+        const hasCosts = costs.some(c => c !== null);
+        if (hasCosts) {
+            datasets.push({
+                type: 'bar',
+                label: 'Kosten (€)',
+                data: costs.map(c => c || 0),
+                backgroundColor: 'rgba(245, 158, 11, 0.35)',
+                borderColor: '#f59e0b',
+                borderWidth: 1,
+                yAxisID: 'y1',
+                order: 1
+            });
+        }
     }
 
     const scales = {
@@ -1223,7 +1294,7 @@ function renderConsumptionChart() {
         }
     };
 
-    if (showCost) {
+    if (showCostBars) {
         scales.y1 = {
             type: 'linear',
             display: true,
@@ -1313,6 +1384,9 @@ document.querySelectorAll('.period-btn').forEach(btn => {
     });
 });
 
+// Cost bars toggle
+document.getElementById('chart-cost-bars').addEventListener('change', () => renderConsumptionChart());
+
 // Separator line toggle
 document.getElementById('chart-separator').addEventListener('change', (e) => {
     document.getElementById('separator-date-group').style.display = e.target.checked ? '' : 'none';
@@ -1388,16 +1462,21 @@ function updateTrackerKPIs() {
         kpiTrend.className = 'kpi-value kpi-trend-stable';
     }
 
-    // Cost KPIs
-    if (trackerContract) {
-        const yearlyConsumptionCost = avgYearlyConsumption * (trackerContract.kwhPrice / 100);
-        const yearlyBaseFee = trackerContract.baseFee * 12;
-        const bonus = trackerContract.bonus || 0;
-        const yearlyCost = yearlyConsumptionCost + yearlyBaseFee - bonus;
+    // Cost KPIs - use currently active contract
+    const activeContract = getActiveContract();
+    if (activeContract) {
+        const yearlyConsumptionCost = avgYearlyConsumption * (activeContract.kwhPrice / 100);
+        const yearlyBaseFee = activeContract.baseFee * 12;
+        const bonusPerDay = getBonusPerDay(activeContract);
+        const yearlyBonus = bonusPerDay * 365.25;
+        const yearlyCost = yearlyConsumptionCost + yearlyBaseFee - yearlyBonus;
         const monthlyCost = yearlyCost / 12;
 
         kpiCostYearly.textContent = formatEuro(yearlyCost);
         kpiCostMonthly.textContent = formatEuro(monthlyCost);
+    } else if (trackerContracts.length > 0) {
+        kpiCostYearly.textContent = 'Kein aktiver';
+        kpiCostMonthly.textContent = 'Kein aktiver';
     } else {
         kpiCostYearly.textContent = 'Kein Vertrag';
         kpiCostMonthly.textContent = 'Kein Vertrag';
@@ -1409,30 +1488,33 @@ function checkCancellationReminder() {
     const banner = document.getElementById('cancellation-banner');
     const text = document.getElementById('cancellation-text');
 
-    if (!trackerContract || !trackerContract.reminderDate) {
-        banner.style.display = 'none';
-        return;
-    }
-
     const today = new Date().toISOString().slice(0, 10);
-    const reminderDate = trackerContract.reminderDate;
+    const alerts = [];
 
-    if (today >= reminderDate) {
+    trackerContracts.forEach(c => {
+        if (!c.reminderDate) return;
+        const reminderDate = c.reminderDate;
+
+        if (today >= reminderDate) {
+            const daysAgo = Math.floor((new Date(today) - new Date(reminderDate)) / (1000 * 60 * 60 * 24));
+            if (daysAgo === 0) {
+                alerts.push(`Heute: Kündigung "${c.name}"!`);
+            } else {
+                alerts.push(`"${c.name}" Kündigung vor ${daysAgo} Tagen fällig!`);
+            }
+        } else {
+            const daysUntil = Math.ceil((new Date(reminderDate) - new Date(today)) / (1000 * 60 * 60 * 24));
+            if (daysUntil <= 30) {
+                alerts.push(`"${c.name}" Kündigung in ${daysUntil} Tagen (${new Date(reminderDate).toLocaleDateString('de-DE')})`);
+            }
+        }
+    });
+
+    if (alerts.length > 0) {
         banner.style.display = '';
-        const daysAgo = Math.floor((new Date(today) - new Date(reminderDate)) / (1000 * 60 * 60 * 24));
-        if (daysAgo === 0) {
-            text.textContent = `Heute ist der Kündigungstermin für "${trackerContract.name}"! Jetzt kündigen!`;
-        } else {
-            text.textContent = `Kündigungserinnerung für "${trackerContract.name}" war vor ${daysAgo} Tagen! Hast du schon gekündigt?`;
-        }
+        text.textContent = alerts.join(' | ');
     } else {
-        const daysUntil = Math.ceil((new Date(reminderDate) - new Date(today)) / (1000 * 60 * 60 * 24));
-        if (daysUntil <= 30) {
-            banner.style.display = '';
-            text.textContent = `Kündigungserinnerung für "${trackerContract.name}" in ${daysUntil} Tagen (${new Date(reminderDate).toLocaleDateString('de-DE')})`;
-        } else {
-            banner.style.display = 'none';
-        }
+        banner.style.display = 'none';
     }
 }
 
@@ -1475,8 +1557,13 @@ document.getElementById('export-form').addEventListener('submit', (e) => {
             'Ø Verbrauch/Tag (kWh)': consumption !== null && days ? Math.round(consumption / days * 10) / 10 : ''
         };
 
-        if (trackerContract) {
-            row['Kosten (€)'] = consumption !== null ? Math.round(consumption * (trackerContract.kwhPrice / 100) * 100) / 100 : '';
+        const contract = getContractForDate(r.date);
+        if (contract && consumption !== null) {
+            const bonusPerDay = getBonusPerDay(contract);
+            const costDays = days || 1;
+            const cost = consumption * (contract.kwhPrice / 100) + contract.baseFee / 30.44 * costDays - bonusPerDay * costDays;
+            row['Vertrag'] = contract.name;
+            row['Kosten (€)'] = Math.round(Math.max(0, cost) * 100) / 100;
         }
 
         return row;

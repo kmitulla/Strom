@@ -195,7 +195,10 @@
                 </div>
                 <div class="chart-options">
                     <label class="checkbox-label">
-                        <input type="checkbox" id="chart-separator"> Trennlinie einblenden
+                        <input type="checkbox" id="chart-cost-bars"> Kosten (€)
+                    </label>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="chart-separator"> Trennlinie
                     </label>
                     <div id="separator-date-group" class="input-group compact" style="display:none; margin-bottom:0;">
                         <input type="date" id="chart-separator-date" style="padding:0.4rem 0.6rem; font-size:0.85rem;">
@@ -205,14 +208,12 @@
                     <canvas id="consumption-chart"></canvas>
                 </div>
 
-                <div id="contract-info" class="settings-card" style="margin-bottom:1rem;">
-                    <div style="display:flex; justify-content:space-between; align-items:center;">
-                        <h3>Vertrag</h3>
-                        <button id="btn-edit-contract" class="btn btn-icon" title="Bearbeiten">✏️</button>
-                    </div>
-                    <div id="contract-details">
-                        <p class="card-subtitle">Kein Vertrag hinterlegt</p>
-                    </div>
+                <div class="section-header">
+                    <h2>Verträge</h2>
+                    <button id="btn-add-contract" class="btn btn-primary btn-sm">+ Vertrag</button>
+                </div>
+                <div id="contracts-list" class="card-list">
+                    <p class="empty-state">Keine Verträge hinterlegt</p>
                 </div>
 
                 <div class="section-header">
