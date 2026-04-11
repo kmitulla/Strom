@@ -1013,6 +1013,7 @@ function openContractModal() {
         document.getElementById('contract-end').value = trackerContract.endDate || '';
         document.getElementById('contract-kwh-price').value = trackerContract.kwhPrice || '';
         document.getElementById('contract-base-fee').value = trackerContract.baseFee || '';
+        document.getElementById('contract-bonus').value = trackerContract.bonus || 0;
         document.getElementById('contract-cancel-date').value = trackerContract.reminderDate || '';
         document.getElementById('contract-edit-id').value = trackerContract.id;
     } else {
@@ -1031,6 +1032,7 @@ document.getElementById('contract-form').addEventListener('submit', async (e) =>
         endDate: document.getElementById('contract-end').value || null,
         kwhPrice: parseFloat(document.getElementById('contract-kwh-price').value) || 0,
         baseFee: parseFloat(document.getElementById('contract-base-fee').value) || 0,
+        bonus: parseFloat(document.getElementById('contract-bonus').value) || 0,
         reminderDate: document.getElementById('contract-cancel-date').value || null,
         createdAt: new Date().toISOString()
     };
@@ -1070,6 +1072,7 @@ function renderContractInfo() {
             ${c.endDate ? `<span class="contract-label">Ende</span><span>${new Date(c.endDate).toLocaleDateString('de-DE')}</span>` : ''}
             <span class="contract-label">Verbrauchspreis</span><span>${c.kwhPrice} ct/kWh</span>
             <span class="contract-label">Grundgebühr</span><span>${formatEuro(c.baseFee)}/Monat</span>
+            ${c.bonus ? `<span class="contract-label">Bonus</span><span>${formatEuro(c.bonus)} (einmalig)</span>` : ''}
             ${c.reminderDate ? `<span class="contract-label">Kündigungserinnerung</span><span>${new Date(c.reminderDate).toLocaleDateString('de-DE')}</span>` : ''}
         </div>
     `;
@@ -1232,6 +1235,49 @@ function renderConsumptionChart() {
         };
     }
 
+    // Separator line plugin
+    const separatorEnabled = document.getElementById('chart-separator').checked;
+    const separatorDate = document.getElementById('chart-separator-date').value;
+    const separatorPlugin = {
+        id: 'separatorLine',
+        afterDraw(chart) {
+            if (!separatorEnabled || !separatorDate) return;
+            // Find the label index closest to the separator date
+            let sepLabel;
+            const period = currentChartPeriod === 'all' ? 'month' : currentChartPeriod;
+            if (period === 'day') {
+                sepLabel = new Date(separatorDate).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' });
+            } else if (period === 'month') {
+                const [y, m] = separatorDate.split('-');
+                const months = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
+                sepLabel = `${months[parseInt(m) - 1]} ${y}`;
+            } else {
+                sepLabel = separatorDate.split('-')[0];
+            }
+            const idx = chart.data.labels.indexOf(sepLabel);
+            if (idx < 0) return;
+            const xScale = chart.scales.x;
+            const yScale = chart.scales.y;
+            const xPixel = xScale.getPixelForValue(idx);
+            if (xPixel < xScale.left || xPixel > xScale.right) return;
+            const ctx = chart.ctx;
+            ctx.save();
+            ctx.beginPath();
+            ctx.setLineDash([6, 4]);
+            ctx.strokeStyle = '#ef4444';
+            ctx.lineWidth = 2;
+            ctx.moveTo(xPixel, yScale.top);
+            ctx.lineTo(xPixel, yScale.bottom);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillStyle = '#ef4444';
+            ctx.font = 'bold 10px -apple-system, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('Trennlinie', xPixel, yScale.top - 4);
+            ctx.restore();
+        }
+    };
+
     consumptionChart = new Chart(canvas, {
         type: 'line',
         data: { labels, datasets },
@@ -1250,9 +1296,10 @@ function renderConsumptionChart() {
                     }
                 }
             },
-            layout: { padding: { top: 10 } },
+            layout: { padding: { top: 14 } },
             scales
-        }
+        },
+        plugins: [separatorPlugin]
     });
 }
 
@@ -1264,6 +1311,17 @@ document.querySelectorAll('.period-btn').forEach(btn => {
         currentChartPeriod = btn.dataset.period;
         renderConsumptionChart();
     });
+});
+
+// Separator line toggle
+document.getElementById('chart-separator').addEventListener('change', (e) => {
+    document.getElementById('separator-date-group').style.display = e.target.checked ? '' : 'none';
+    if (!e.target.checked) {
+        renderConsumptionChart();
+    }
+});
+document.getElementById('chart-separator-date').addEventListener('change', () => {
+    renderConsumptionChart();
 });
 
 // ============ TRACKER KPIs ============
@@ -1334,7 +1392,8 @@ function updateTrackerKPIs() {
     if (trackerContract) {
         const yearlyConsumptionCost = avgYearlyConsumption * (trackerContract.kwhPrice / 100);
         const yearlyBaseFee = trackerContract.baseFee * 12;
-        const yearlyCost = yearlyConsumptionCost + yearlyBaseFee;
+        const bonus = trackerContract.bonus || 0;
+        const yearlyCost = yearlyConsumptionCost + yearlyBaseFee - bonus;
         const monthlyCost = yearlyCost / 12;
 
         kpiCostYearly.textContent = formatEuro(yearlyCost);

@@ -773,6 +773,18 @@ body {
     font-size: 0.82rem;
 }
 
+/* Chart Options */
+.chart-options {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+    flex-wrap: wrap;
+}
+.chart-options .checkbox-label {
+    font-size: 0.82rem !important;
+}
+
 /* Tracker Dashboard Card */
 .tracker-dashboard-card {
     border-left: 4px solid var(--primary);
