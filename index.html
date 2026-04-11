@@ -12,8 +12,9 @@
     <link rel="shortcut icon" href="iconimage.png">
     <link rel="manifest" href="manifest.json">
     <title>⚡ Strom-Vergleich</title>
-    <link rel="stylesheet" href="css/style.css?v=4">
+    <link rel="stylesheet" href="css/style.css?v=5">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
     <div id="app">
@@ -74,6 +75,14 @@
                 </div>
                 <div id="comparisons-list" class="card-list">
                     <p class="empty-state">Noch keine Vergleiche vorhanden.<br>Erstelle deinen ersten Stromvergleich!</p>
+                </div>
+
+                <div class="section-header" style="margin-top:1.5rem;">
+                    <h2>Stromzähler</h2>
+                </div>
+                <div id="btn-open-tracker" class="card card-clickable tracker-dashboard-card">
+                    <div class="card-title">📊 Strom-Tracker</div>
+                    <div class="card-subtitle" id="tracker-subtitle">Zählerstände erfassen, Verbrauch & Kosten überwachen</div>
                 </div>
             </main>
         </div>
@@ -137,6 +146,73 @@
                             </div>
                         </div>
                     </div>
+                </div>
+            </main>
+        </div>
+
+        <!-- TRACKER SCREEN -->
+        <div id="tracker-screen" class="screen">
+            <header class="app-header">
+                <button id="btn-back-tracker" class="btn btn-icon">←</button>
+                <h1>Stromzähler</h1>
+                <div class="header-actions">
+                    <button id="btn-export-readings" class="btn btn-icon" title="Excel Export">📊</button>
+                    <button id="btn-contract-settings" class="btn btn-icon" title="Vertrag">📋</button>
+                </div>
+            </header>
+            <main class="content">
+                <div class="kpi-grid">
+                    <div class="kpi-card">
+                        <div class="kpi-label">Ø Verbrauch / Jahr</div>
+                        <div class="kpi-value" id="kpi-avg-yearly">– kWh</div>
+                    </div>
+                    <div class="kpi-card">
+                        <div class="kpi-label">Trend (90 Tage)</div>
+                        <div class="kpi-value" id="kpi-trend">–</div>
+                    </div>
+                    <div class="kpi-card">
+                        <div class="kpi-label">Gesch. Kosten / Jahr</div>
+                        <div class="kpi-value" id="kpi-cost-yearly">–</div>
+                    </div>
+                    <div class="kpi-card">
+                        <div class="kpi-label">Gesch. Kosten / Monat</div>
+                        <div class="kpi-value" id="kpi-cost-monthly">–</div>
+                    </div>
+                </div>
+
+                <div id="cancellation-banner" class="cancellation-banner" style="display:none;">
+                    <span id="cancellation-text"></span>
+                </div>
+
+                <div class="section-header">
+                    <h2>Verbrauch</h2>
+                    <div class="chart-period-toggle">
+                        <button class="period-btn" data-period="day">Tag</button>
+                        <button class="period-btn active" data-period="month">Monat</button>
+                        <button class="period-btn" data-period="year">Jahr</button>
+                        <button class="period-btn" data-period="all">Gesamt</button>
+                    </div>
+                </div>
+                <div class="chart-container">
+                    <canvas id="consumption-chart"></canvas>
+                </div>
+
+                <div id="contract-info" class="settings-card" style="margin-bottom:1rem;">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <h3>Vertrag</h3>
+                        <button id="btn-edit-contract" class="btn btn-icon" title="Bearbeiten">✏️</button>
+                    </div>
+                    <div id="contract-details">
+                        <p class="card-subtitle">Kein Vertrag hinterlegt</p>
+                    </div>
+                </div>
+
+                <div class="section-header">
+                    <h2>Zählerstände</h2>
+                    <button id="btn-add-reading" class="btn btn-primary btn-sm">+ Ablesen</button>
+                </div>
+                <div id="readings-list" class="card-list">
+                    <p class="empty-state">Noch keine Zählerstände erfasst.<br>Erfasse deinen ersten Zählerstand!</p>
                 </div>
             </main>
         </div>
@@ -264,10 +340,91 @@
             </div>
         </div>
 
+        <!-- ADD/EDIT READING MODAL -->
+        <div id="reading-modal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 id="reading-modal-title">Zählerstand erfassen</h2>
+                    <button class="btn btn-icon modal-close" data-modal="reading-modal">✕</button>
+                </div>
+                <form id="reading-form">
+                    <div class="input-group">
+                        <label for="reading-date">Datum</label>
+                        <input type="date" id="reading-date" required>
+                    </div>
+                    <div class="input-group">
+                        <label for="reading-value">Zählerstand (kWh)</label>
+                        <input type="number" id="reading-value" placeholder="z.B. 12345" step="0.1" min="0" required>
+                    </div>
+                    <input type="hidden" id="reading-edit-id" value="">
+                    <button type="submit" class="btn btn-primary btn-full">Speichern</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- CONTRACT MODAL -->
+        <div id="contract-modal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 id="contract-modal-title">Vertrag</h2>
+                    <button class="btn btn-icon modal-close" data-modal="contract-modal">✕</button>
+                </div>
+                <form id="contract-form">
+                    <div class="input-group">
+                        <label for="contract-name">Anbieter / Vertragsname</label>
+                        <input type="text" id="contract-name" placeholder="z.B. Vattenfall Easy24" required>
+                    </div>
+                    <div class="input-group">
+                        <label for="contract-start">Vertragsbeginn</label>
+                        <input type="date" id="contract-start" required>
+                    </div>
+                    <div class="input-group">
+                        <label for="contract-end">Vertragsende (optional)</label>
+                        <input type="date" id="contract-end">
+                    </div>
+                    <div class="input-group">
+                        <label for="contract-kwh-price">Verbrauchspreis (Cent/kWh)</label>
+                        <input type="number" id="contract-kwh-price" placeholder="z.B. 29.5" step="0.01" min="0" required>
+                    </div>
+                    <div class="input-group">
+                        <label for="contract-base-fee">Monatliche Grundgebühr (€)</label>
+                        <input type="number" id="contract-base-fee" placeholder="z.B. 12.50" step="0.01" min="0" required>
+                    </div>
+                    <div class="input-group">
+                        <label for="contract-cancel-date">Kündigungserinnerung (Datum)</label>
+                        <input type="date" id="contract-cancel-date">
+                    </div>
+                    <input type="hidden" id="contract-edit-id" value="">
+                    <button type="submit" class="btn btn-primary btn-full">Speichern</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- EXPORT MODAL -->
+        <div id="export-modal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Excel Export</h2>
+                    <button class="btn btn-icon modal-close" data-modal="export-modal">✕</button>
+                </div>
+                <form id="export-form">
+                    <div class="input-group">
+                        <label for="export-from">Von</label>
+                        <input type="date" id="export-from">
+                    </div>
+                    <div class="input-group">
+                        <label for="export-to">Bis</label>
+                        <input type="date" id="export-to">
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-full">Exportieren</button>
+                </form>
+            </div>
+        </div>
+
         <!-- TOAST -->
         <div id="toast" class="toast"></div>
     </div>
 
-    <script type="module" src="js/app.js?v=4"></script>
+    <script type="module" src="js/app.js?v=5"></script>
 </body>
 </html>

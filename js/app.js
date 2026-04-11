@@ -23,6 +23,12 @@ let currentUser = null;    // { id, username, isAdmin }
 let currentComparison = null;
 let breakEvenChart = null;
 
+// Tracker state
+let trackerReadings = [];
+let trackerContract = null;
+let consumptionChart = null;
+let currentChartPeriod = 'month';
+
 // ============ HELPERS ============
 async function hashPassword(pw) {
     const enc = new TextEncoder().encode(pw);
@@ -138,6 +144,7 @@ function enterApp() {
     document.getElementById('btn-admin').style.display = currentUser.isAdmin ? '' : 'none';
     showScreen('dashboard-screen');
     loadComparisons();
+    updateTrackerCard();
 }
 
 // ============ SETTINGS ============
@@ -835,6 +842,601 @@ function updateForecast() {
         nachList.appendChild(item);
     });
 }
+
+// ============ TRACKER ============
+
+// Dashboard card
+document.getElementById('btn-open-tracker').addEventListener('click', () => {
+    showScreen('tracker-screen');
+    loadTracker();
+});
+document.getElementById('btn-back-tracker').addEventListener('click', () => {
+    showScreen('dashboard-screen');
+    loadComparisons();
+    updateTrackerCard();
+});
+
+async function updateTrackerCard() {
+    try {
+        const snap = await getDocs(collection(db, `users/${currentUser.userId}/meterReadings`));
+        const subtitle = document.getElementById('tracker-subtitle');
+        if (snap.size === 0) {
+            subtitle.textContent = 'Noch keine Zählerstände erfasst';
+        } else {
+            let latest = '';
+            snap.forEach(d => {
+                const date = d.data().date;
+                if (date > latest) latest = date;
+            });
+            subtitle.textContent = `${snap.size} Einträge · Letzte Ablesung: ${new Date(latest).toLocaleDateString('de-DE')}`;
+        }
+    } catch (e) { /* ignore */ }
+}
+
+async function loadTracker() {
+    await Promise.all([loadReadings(), loadContract()]);
+    renderReadings();
+    renderContractInfo();
+    renderConsumptionChart();
+    updateTrackerKPIs();
+    checkCancellationReminder();
+}
+
+async function loadReadings() {
+    const snap = await getDocs(collection(db, `users/${currentUser.userId}/meterReadings`));
+    trackerReadings = [];
+    snap.forEach(d => {
+        trackerReadings.push({ id: d.id, ...d.data() });
+    });
+    trackerReadings.sort((a, b) => a.date.localeCompare(b.date));
+}
+
+async function loadContract() {
+    const snap = await getDocs(collection(db, `users/${currentUser.userId}/contracts`));
+    trackerContract = null;
+    snap.forEach(d => {
+        const data = { id: d.id, ...d.data() };
+        if (!trackerContract || data.createdAt > trackerContract.createdAt) {
+            trackerContract = data;
+        }
+    });
+}
+
+// ============ READINGS CRUD ============
+function renderReadings() {
+    const list = document.getElementById('readings-list');
+    list.innerHTML = '';
+
+    if (trackerReadings.length === 0) {
+        list.innerHTML = '<p class="empty-state">Noch keine Zählerstände erfasst.<br>Erfasse deinen ersten Zählerstand!</p>';
+        return;
+    }
+
+    const sorted = [...trackerReadings].reverse();
+    sorted.forEach((r, idx) => {
+        const actualIdx = trackerReadings.length - 1 - idx;
+        const prev = actualIdx > 0 ? trackerReadings[actualIdx - 1] : null;
+        const consumption = prev ? r.value - prev.value : null;
+        const days = prev ? Math.max(1, (new Date(r.date) - new Date(prev.date)) / (1000 * 60 * 60 * 24)) : null;
+
+        const card = document.createElement('div');
+        card.className = 'card reading-card';
+        card.innerHTML = `
+            <div class="reading-info">
+                <div class="card-title">${new Date(r.date).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })}</div>
+                <div class="card-subtitle">
+                    Zählerstand: <strong>${r.value.toLocaleString('de-DE')} kWh</strong>
+                    ${consumption !== null
+                        ? `<br>Verbrauch: ${Math.round(consumption).toLocaleString('de-DE')} kWh in ${Math.round(days)} Tagen (${(consumption / days).toFixed(1)} kWh/Tag)`
+                        : '<br>Erster Eintrag'}
+                </div>
+            </div>
+            <div class="provider-actions">
+                <button class="btn btn-icon" title="Bearbeiten" data-edit-reading="${r.id}">✏️</button>
+                <button class="btn btn-icon btn-danger-icon" title="Löschen" data-delete-reading="${r.id}">🗑️</button>
+            </div>
+        `;
+        list.appendChild(card);
+    });
+
+    list.onclick = async (e) => {
+        const editBtn = e.target.closest('[data-edit-reading]');
+        const delBtn = e.target.closest('[data-delete-reading]');
+
+        if (editBtn) {
+            const id = editBtn.dataset.editReading;
+            const reading = trackerReadings.find(r => r.id === id);
+            if (!reading) return;
+            document.getElementById('reading-modal-title').textContent = 'Zählerstand bearbeiten';
+            document.getElementById('reading-date').value = reading.date;
+            document.getElementById('reading-value').value = reading.value;
+            document.getElementById('reading-edit-id').value = id;
+            showModal('reading-modal');
+        }
+
+        if (delBtn) {
+            const id = delBtn.dataset.deleteReading;
+            if (!confirm('Zählerstand wirklich löschen?')) return;
+            await deleteDoc(doc(db, `users/${currentUser.userId}/meterReadings`, id));
+            toast('Zählerstand gelöscht');
+            await loadReadings();
+            renderReadings();
+            renderConsumptionChart();
+            updateTrackerKPIs();
+        }
+    };
+}
+
+document.getElementById('btn-add-reading').addEventListener('click', () => {
+    document.getElementById('reading-modal-title').textContent = 'Zählerstand erfassen';
+    document.getElementById('reading-form').reset();
+    document.getElementById('reading-date').value = new Date().toISOString().slice(0, 10);
+    document.getElementById('reading-edit-id').value = '';
+    showModal('reading-modal');
+});
+
+document.getElementById('reading-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const date = document.getElementById('reading-date').value;
+    const value = parseFloat(document.getElementById('reading-value').value);
+    const editId = document.getElementById('reading-edit-id').value;
+
+    if (!date || isNaN(value)) return;
+
+    if (editId) {
+        await updateDoc(doc(db, `users/${currentUser.userId}/meterReadings`, editId), { date, value });
+        toast('Zählerstand aktualisiert');
+    } else {
+        const newId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+        await setDoc(doc(db, `users/${currentUser.userId}/meterReadings`, newId), {
+            date, value, createdAt: new Date().toISOString()
+        });
+        toast('Zählerstand gespeichert');
+    }
+
+    hideModal('reading-modal');
+    await loadReadings();
+    renderReadings();
+    renderConsumptionChart();
+    updateTrackerKPIs();
+});
+
+// ============ CONTRACT ============
+document.getElementById('btn-contract-settings').addEventListener('click', () => openContractModal());
+document.getElementById('btn-edit-contract').addEventListener('click', () => openContractModal());
+
+function openContractModal() {
+    if (trackerContract) {
+        document.getElementById('contract-modal-title').textContent = 'Vertrag bearbeiten';
+        document.getElementById('contract-name').value = trackerContract.name || '';
+        document.getElementById('contract-start').value = trackerContract.startDate || '';
+        document.getElementById('contract-end').value = trackerContract.endDate || '';
+        document.getElementById('contract-kwh-price').value = trackerContract.kwhPrice || '';
+        document.getElementById('contract-base-fee').value = trackerContract.baseFee || '';
+        document.getElementById('contract-cancel-date').value = trackerContract.reminderDate || '';
+        document.getElementById('contract-edit-id').value = trackerContract.id;
+    } else {
+        document.getElementById('contract-modal-title').textContent = 'Vertrag anlegen';
+        document.getElementById('contract-form').reset();
+        document.getElementById('contract-edit-id').value = '';
+    }
+    showModal('contract-modal');
+}
+
+document.getElementById('contract-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const data = {
+        name: document.getElementById('contract-name').value.trim(),
+        startDate: document.getElementById('contract-start').value,
+        endDate: document.getElementById('contract-end').value || null,
+        kwhPrice: parseFloat(document.getElementById('contract-kwh-price').value) || 0,
+        baseFee: parseFloat(document.getElementById('contract-base-fee').value) || 0,
+        reminderDate: document.getElementById('contract-cancel-date').value || null,
+        createdAt: new Date().toISOString()
+    };
+
+    const editId = document.getElementById('contract-edit-id').value;
+
+    if (editId) {
+        await updateDoc(doc(db, `users/${currentUser.userId}/contracts`, editId), data);
+        toast('Vertrag aktualisiert');
+    } else {
+        const newId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+        await setDoc(doc(db, `users/${currentUser.userId}/contracts`, newId), data);
+        toast('Vertrag gespeichert');
+    }
+
+    hideModal('contract-modal');
+    await loadContract();
+    renderContractInfo();
+    renderConsumptionChart();
+    updateTrackerKPIs();
+    checkCancellationReminder();
+});
+
+function renderContractInfo() {
+    const details = document.getElementById('contract-details');
+
+    if (!trackerContract) {
+        details.innerHTML = '<p class="card-subtitle">Kein Vertrag hinterlegt. Tippe auf ✏️ um einen anzulegen.</p>';
+        return;
+    }
+
+    const c = trackerContract;
+    details.innerHTML = `
+        <div class="contract-details-grid">
+            <span class="contract-label">Anbieter</span><span>${esc(c.name)}</span>
+            <span class="contract-label">Beginn</span><span>${new Date(c.startDate).toLocaleDateString('de-DE')}</span>
+            ${c.endDate ? `<span class="contract-label">Ende</span><span>${new Date(c.endDate).toLocaleDateString('de-DE')}</span>` : ''}
+            <span class="contract-label">Verbrauchspreis</span><span>${c.kwhPrice} ct/kWh</span>
+            <span class="contract-label">Grundgebühr</span><span>${formatEuro(c.baseFee)}/Monat</span>
+            ${c.reminderDate ? `<span class="contract-label">Kündigungserinnerung</span><span>${new Date(c.reminderDate).toLocaleDateString('de-DE')}</span>` : ''}
+        </div>
+    `;
+}
+
+// ============ CONSUMPTION CHART ============
+function calcConsumptionSegments() {
+    if (trackerReadings.length < 2) return [];
+    const segments = [];
+    for (let i = 1; i < trackerReadings.length; i++) {
+        const prev = trackerReadings[i - 1];
+        const curr = trackerReadings[i];
+        const consumption = curr.value - prev.value;
+        const d1 = new Date(prev.date);
+        const d2 = new Date(curr.date);
+        const days = Math.max(1, (d2 - d1) / (1000 * 60 * 60 * 24));
+        segments.push({
+            fromDate: prev.date,
+            toDate: curr.date,
+            consumption,
+            days,
+            dailyRate: consumption / days
+        });
+    }
+    return segments;
+}
+
+function aggregateByPeriod(segments, period) {
+    const buckets = {};
+
+    segments.forEach(seg => {
+        const d1 = new Date(seg.fromDate);
+        const d2 = new Date(seg.toDate);
+        let current = new Date(d1);
+
+        while (current < d2) {
+            let key;
+            if (period === 'day') {
+                key = current.toISOString().slice(0, 10);
+            } else if (period === 'month') {
+                key = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}`;
+            } else {
+                key = `${current.getFullYear()}`;
+            }
+
+            if (!buckets[key]) buckets[key] = 0;
+            buckets[key] += seg.dailyRate;
+            current.setDate(current.getDate() + 1);
+        }
+    });
+
+    return Object.entries(buckets)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([label, value]) => ({ label, value: Math.round(value * 10) / 10 }));
+}
+
+function formatPeriodLabel(label, period) {
+    if (period === 'day') {
+        return new Date(label).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' });
+    } else if (period === 'month') {
+        const [y, m] = label.split('-');
+        const months = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
+        return `${months[parseInt(m) - 1]} ${y}`;
+    }
+    return label;
+}
+
+function renderConsumptionChart() {
+    const segments = calcConsumptionSegments();
+    const canvas = document.getElementById('consumption-chart');
+
+    if (consumptionChart) consumptionChart.destroy();
+
+    if (segments.length === 0) {
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        return;
+    }
+
+    const period = currentChartPeriod === 'all' ? 'month' : currentChartPeriod;
+    let data = aggregateByPeriod(segments, period);
+
+    // Limit data points for readability
+    if (currentChartPeriod === 'day' && data.length > 90) {
+        data = data.slice(-90);
+    } else if (currentChartPeriod === 'month' && data.length > 24) {
+        data = data.slice(-24);
+    }
+
+    const labels = data.map(d => formatPeriodLabel(d.label, period));
+    const values = data.map(d => d.value);
+
+    const showCost = trackerContract && trackerContract.kwhPrice;
+
+    const datasets = [{
+        label: 'Verbrauch (kWh)',
+        data: values,
+        borderColor: '#3b82f6',
+        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+        tension: 0.3,
+        fill: true,
+        pointRadius: data.length > 30 ? 0 : 3,
+        pointHitRadius: 10,
+        borderWidth: 2.5,
+        yAxisID: 'y'
+    }];
+
+    if (showCost) {
+        const costs = values.map(v => {
+            const consumptionCost = v * (trackerContract.kwhPrice / 100);
+            let baseFeePerPeriod = 0;
+            if (period === 'day') baseFeePerPeriod = trackerContract.baseFee / 30.44;
+            else if (period === 'month') baseFeePerPeriod = trackerContract.baseFee;
+            else baseFeePerPeriod = trackerContract.baseFee * 12;
+            return Math.round((consumptionCost + baseFeePerPeriod) * 100) / 100;
+        });
+
+        datasets.push({
+            label: 'Kosten (€)',
+            data: costs,
+            borderColor: '#f59e0b',
+            backgroundColor: 'rgba(245, 158, 11, 0.1)',
+            tension: 0.3,
+            fill: false,
+            pointRadius: data.length > 30 ? 0 : 3,
+            pointHitRadius: 10,
+            borderWidth: 2,
+            borderDash: [5, 3],
+            yAxisID: 'y1'
+        });
+    }
+
+    const scales = {
+        y: {
+            type: 'linear',
+            display: true,
+            position: 'left',
+            title: { display: true, text: 'kWh', font: { size: 11 } },
+            ticks: { callback: v => v.toLocaleString('de-DE') },
+            beginAtZero: true
+        },
+        x: {
+            ticks: {
+                maxRotation: 45,
+                font: { size: 10 },
+                maxTicksLimit: 12
+            }
+        }
+    };
+
+    if (showCost) {
+        scales.y1 = {
+            type: 'linear',
+            display: true,
+            position: 'right',
+            title: { display: true, text: '€', font: { size: 11 } },
+            ticks: { callback: v => v.toLocaleString('de-DE') + ' €' },
+            beginAtZero: true,
+            grid: { drawOnChartArea: false }
+        };
+    }
+
+    consumptionChart = new Chart(canvas, {
+        type: 'line',
+        data: { labels, datasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { position: 'bottom', labels: { boxWidth: 12, padding: 12, font: { size: 11 } } },
+                tooltip: {
+                    callbacks: {
+                        label: ctx => {
+                            if (ctx.datasetIndex === 0) return `Verbrauch: ${ctx.parsed.y.toLocaleString('de-DE')} kWh`;
+                            return `Kosten: ${formatEuro(ctx.parsed.y)}`;
+                        }
+                    }
+                }
+            },
+            layout: { padding: { top: 10 } },
+            scales
+        }
+    });
+}
+
+// Period toggle
+document.querySelectorAll('.period-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentChartPeriod = btn.dataset.period;
+        renderConsumptionChart();
+    });
+});
+
+// ============ TRACKER KPIs ============
+function updateTrackerKPIs() {
+    const segments = calcConsumptionSegments();
+
+    const kpiAvg = document.getElementById('kpi-avg-yearly');
+    const kpiTrend = document.getElementById('kpi-trend');
+    const kpiCostYearly = document.getElementById('kpi-cost-yearly');
+    const kpiCostMonthly = document.getElementById('kpi-cost-monthly');
+
+    if (segments.length === 0) {
+        kpiAvg.textContent = '– kWh';
+        kpiTrend.textContent = '–';
+        kpiTrend.className = 'kpi-value';
+        kpiCostYearly.textContent = '–';
+        kpiCostMonthly.textContent = '–';
+        return;
+    }
+
+    const totalConsumption = segments.reduce((sum, s) => sum + s.consumption, 0);
+    const totalDays = segments.reduce((sum, s) => sum + s.days, 0);
+    const avgDailyConsumption = totalConsumption / totalDays;
+    const avgYearlyConsumption = Math.round(avgDailyConsumption * 365);
+
+    kpiAvg.textContent = `${avgYearlyConsumption.toLocaleString('de-DE')} kWh`;
+
+    // Trend: compare last 90 days vs overall average
+    const now = new Date();
+    const ninetyDaysAgo = new Date(now);
+    ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+
+    let recentConsumption = 0;
+    let recentDays = 0;
+    segments.forEach(seg => {
+        const segStart = new Date(seg.fromDate);
+        const segEnd = new Date(seg.toDate);
+        const overlapStart = new Date(Math.max(segStart, ninetyDaysAgo));
+        const overlapEnd = new Date(Math.min(segEnd, now));
+
+        if (overlapEnd > overlapStart) {
+            const overlapDays = (overlapEnd - overlapStart) / (1000 * 60 * 60 * 24);
+            recentConsumption += seg.dailyRate * overlapDays;
+            recentDays += overlapDays;
+        }
+    });
+
+    if (recentDays > 30) {
+        const recentDailyAvg = recentConsumption / recentDays;
+        const diffPercent = ((recentDailyAvg - avgDailyConsumption) / avgDailyConsumption) * 100;
+
+        if (Math.abs(diffPercent) < 3) {
+            kpiTrend.textContent = '→ Stabil';
+            kpiTrend.className = 'kpi-value kpi-trend-stable';
+        } else if (diffPercent > 0) {
+            kpiTrend.textContent = `↑ +${diffPercent.toFixed(0)}% mehr`;
+            kpiTrend.className = 'kpi-value kpi-trend-up';
+        } else {
+            kpiTrend.textContent = `↓ ${diffPercent.toFixed(0)}% weniger`;
+            kpiTrend.className = 'kpi-value kpi-trend-down';
+        }
+    } else {
+        kpiTrend.textContent = 'Zu wenig Daten';
+        kpiTrend.className = 'kpi-value kpi-trend-stable';
+    }
+
+    // Cost KPIs
+    if (trackerContract) {
+        const yearlyConsumptionCost = avgYearlyConsumption * (trackerContract.kwhPrice / 100);
+        const yearlyBaseFee = trackerContract.baseFee * 12;
+        const yearlyCost = yearlyConsumptionCost + yearlyBaseFee;
+        const monthlyCost = yearlyCost / 12;
+
+        kpiCostYearly.textContent = formatEuro(yearlyCost);
+        kpiCostMonthly.textContent = formatEuro(monthlyCost);
+    } else {
+        kpiCostYearly.textContent = 'Kein Vertrag';
+        kpiCostMonthly.textContent = 'Kein Vertrag';
+    }
+}
+
+// ============ CANCELLATION REMINDER ============
+function checkCancellationReminder() {
+    const banner = document.getElementById('cancellation-banner');
+    const text = document.getElementById('cancellation-text');
+
+    if (!trackerContract || !trackerContract.reminderDate) {
+        banner.style.display = 'none';
+        return;
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    const reminderDate = trackerContract.reminderDate;
+
+    if (today >= reminderDate) {
+        banner.style.display = '';
+        const daysAgo = Math.floor((new Date(today) - new Date(reminderDate)) / (1000 * 60 * 60 * 24));
+        if (daysAgo === 0) {
+            text.textContent = `Heute ist der Kündigungstermin für "${trackerContract.name}"! Jetzt kündigen!`;
+        } else {
+            text.textContent = `Kündigungserinnerung für "${trackerContract.name}" war vor ${daysAgo} Tagen! Hast du schon gekündigt?`;
+        }
+    } else {
+        const daysUntil = Math.ceil((new Date(reminderDate) - new Date(today)) / (1000 * 60 * 60 * 24));
+        if (daysUntil <= 30) {
+            banner.style.display = '';
+            text.textContent = `Kündigungserinnerung für "${trackerContract.name}" in ${daysUntil} Tagen (${new Date(reminderDate).toLocaleDateString('de-DE')})`;
+        } else {
+            banner.style.display = 'none';
+        }
+    }
+}
+
+// ============ EXCEL EXPORT ============
+document.getElementById('btn-export-readings').addEventListener('click', () => {
+    if (trackerReadings.length > 0) {
+        document.getElementById('export-from').value = trackerReadings[0].date;
+        document.getElementById('export-to').value = trackerReadings[trackerReadings.length - 1].date;
+    } else {
+        document.getElementById('export-from').value = '';
+        document.getElementById('export-to').value = '';
+    }
+    showModal('export-modal');
+});
+
+document.getElementById('export-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const fromDate = document.getElementById('export-from').value;
+    const toDate = document.getElementById('export-to').value;
+
+    let readings = [...trackerReadings];
+    if (fromDate) readings = readings.filter(r => r.date >= fromDate);
+    if (toDate) readings = readings.filter(r => r.date <= toDate);
+
+    if (readings.length === 0) {
+        toast('Keine Daten im gewählten Zeitraum');
+        return;
+    }
+
+    const exportData = readings.map((r, i) => {
+        const prev = i > 0 ? readings[i - 1] : null;
+        const consumption = prev ? r.value - prev.value : null;
+        const days = prev ? Math.max(1, (new Date(r.date) - new Date(prev.date)) / (1000 * 60 * 60 * 24)) : null;
+
+        const row = {
+            'Datum': r.date,
+            'Zählerstand (kWh)': r.value,
+            'Verbrauch (kWh)': consumption !== null ? Math.round(consumption * 10) / 10 : '',
+            'Tage seit letzter Ablesung': days !== null ? Math.round(days) : '',
+            'Ø Verbrauch/Tag (kWh)': consumption !== null && days ? Math.round(consumption / days * 10) / 10 : ''
+        };
+
+        if (trackerContract) {
+            row['Kosten (€)'] = consumption !== null ? Math.round(consumption * (trackerContract.kwhPrice / 100) * 100) / 100 : '';
+        }
+
+        return row;
+    });
+
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Zählerstände');
+
+    const colWidths = Object.keys(exportData[0]).map(key => ({
+        wch: Math.max(key.length + 2, ...exportData.map(r => String(r[key] || '').length + 2))
+    }));
+    ws['!cols'] = colWidths;
+
+    const fileName = `Stromzaehler_${fromDate || 'alle'}_${toDate || 'alle'}.xlsx`;
+    XLSX.writeFile(wb, fileName);
+    hideModal('export-modal');
+    toast('Excel exportiert!');
+});
 
 // ============ MODAL CLOSE ============
 document.querySelectorAll('.modal-close').forEach(btn => {

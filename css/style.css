@@ -99,7 +99,8 @@ body {
 
 .input-group input[type="text"],
 .input-group input[type="password"],
-.input-group input[type="number"] {
+.input-group input[type="number"],
+.input-group input[type="date"] {
     width: 100%;
     padding: 0.75rem 1rem;
     border: 1.5px solid var(--border);
@@ -672,6 +673,111 @@ body {
     to { transform: rotate(360deg); }
 }
 
+/* ============ TRACKER STYLES ============ */
+
+/* KPI Grid */
+.kpi-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.6rem;
+    margin-bottom: 1rem;
+}
+.kpi-card {
+    background: var(--card);
+    border-radius: var(--radius);
+    padding: 0.85rem 1rem;
+    box-shadow: var(--shadow);
+}
+.kpi-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin-bottom: 0.25rem;
+}
+.kpi-value {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--text);
+}
+.kpi-trend-up {
+    color: var(--danger) !important;
+}
+.kpi-trend-down {
+    color: var(--success) !important;
+}
+.kpi-trend-stable {
+    color: var(--text-secondary) !important;
+}
+
+/* Period Toggle */
+.chart-period-toggle {
+    display: flex;
+    gap: 0.2rem;
+    background: var(--bg);
+    border-radius: var(--radius-sm);
+    padding: 0.2rem;
+}
+.period-btn {
+    padding: 0.3rem 0.6rem;
+    border: none;
+    background: none;
+    border-radius: 6px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.period-btn.active {
+    background: var(--primary);
+    color: #fff;
+}
+.period-btn:hover:not(.active) {
+    background: var(--border);
+}
+
+/* Cancellation Banner */
+.cancellation-banner {
+    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+    color: #fff;
+    padding: 0.75rem 1rem;
+    border-radius: var(--radius);
+    margin-bottom: 1rem;
+    font-size: 0.88rem;
+    font-weight: 500;
+    line-height: 1.4;
+}
+
+/* Reading Card */
+.reading-card {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+}
+.reading-info {
+    flex: 1;
+}
+
+/* Contract Details */
+.contract-details-grid {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.3rem 1rem;
+    font-size: 0.9rem;
+    margin-top: 0.5rem;
+}
+.contract-label {
+    color: var(--text-secondary);
+    font-size: 0.82rem;
+}
+
+/* Tracker Dashboard Card */
+.tracker-dashboard-card {
+    border-left: 4px solid var(--primary);
+}
+
 /* RESPONSIVE - Desktop */
 @media (min-width: 768px) {
     .modal {
@@ -684,6 +790,9 @@ body {
     }
     .chart-container {
         height: 350px;
+    }
+    .kpi-value {
+        font-size: 1.3rem;
     }
 }
 
