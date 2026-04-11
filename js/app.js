@@ -1219,6 +1219,43 @@ function formatPeriodLabel(label, period) {
     return label;
 }
 
+function getDateRangeFilter() {
+    const enabled = document.getElementById('chart-custom-range').checked;
+    if (!enabled) return { from: null, to: null };
+    return {
+        from: document.getElementById('range-from').value || null,
+        to: document.getElementById('range-to').value || null
+    };
+}
+
+function filterDataByRange(data, range, period) {
+    if (!range.from && !range.to) return data;
+    return data.filter(d => {
+        let dateStr;
+        if (period === 'day') dateStr = d.label;
+        else if (period === 'month') dateStr = d.label + '-01';
+        else dateStr = d.label + '-01-01';
+        if (range.from && dateStr < range.from) return false;
+        if (range.to && dateStr > range.to) return false;
+        return true;
+    });
+}
+
+function calcLinearRegression(values) {
+    const n = values.length;
+    if (n < 2) return null;
+    let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+    for (let i = 0; i < n; i++) {
+        sumX += i;
+        sumY += values[i];
+        sumXY += i * values[i];
+        sumX2 += i * i;
+    }
+    const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+    const intercept = (sumY - slope * sumX) / n;
+    return values.map((_, i) => Math.round((intercept + slope * i) * 10) / 10);
+}
+
 function renderConsumptionChart() {
     const segments = calcConsumptionSegments();
     const canvas = document.getElementById('consumption-chart');
@@ -1234,11 +1271,23 @@ function renderConsumptionChart() {
     const period = currentChartPeriod === 'all' ? 'month' : currentChartPeriod;
     let data = aggregateByPeriod(segments, period);
 
-    // Limit data points for readability
-    if (currentChartPeriod === 'day' && data.length > 90) {
-        data = data.slice(-90);
-    } else if (currentChartPeriod === 'month' && data.length > 24) {
-        data = data.slice(-24);
+    // Apply date range filter
+    const range = getDateRangeFilter();
+    data = filterDataByRange(data, range, period);
+
+    // Limit data points for readability (only if no custom range)
+    if (!range.from && !range.to) {
+        if (currentChartPeriod === 'day' && data.length > 90) {
+            data = data.slice(-90);
+        } else if (currentChartPeriod === 'month' && data.length > 24) {
+            data = data.slice(-24);
+        }
+    }
+
+    if (data.length === 0) {
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        return;
     }
 
     const labels = data.map(d => formatPeriodLabel(d.label, period));
@@ -1272,6 +1321,27 @@ function renderConsumptionChart() {
                 borderWidth: 1,
                 yAxisID: 'y1',
                 order: 1
+            });
+        }
+    }
+
+    // Trendline
+    const showTrend = document.getElementById('chart-trendline').checked;
+    if (showTrend && values.length >= 2) {
+        const trendValues = calcLinearRegression(values);
+        if (trendValues) {
+            datasets.push({
+                label: 'Trend',
+                data: trendValues,
+                borderColor: '#8b5cf6',
+                borderWidth: 2,
+                borderDash: [8, 4],
+                pointRadius: 0,
+                pointHitRadius: 0,
+                fill: false,
+                tension: 0,
+                yAxisID: 'y',
+                order: 0
             });
         }
     }
@@ -1387,6 +1457,18 @@ document.querySelectorAll('.period-btn').forEach(btn => {
 // Cost bars toggle
 document.getElementById('chart-cost-bars').addEventListener('change', () => renderConsumptionChart());
 
+// Trendline toggle
+document.getElementById('chart-trendline').addEventListener('change', () => renderConsumptionChart());
+
+// Custom date range toggle
+document.getElementById('chart-custom-range').addEventListener('change', (e) => {
+    document.getElementById('custom-range-group').style.display = e.target.checked ? '' : 'none';
+    renderConsumptionChart();
+    updateTrackerKPIs();
+});
+document.getElementById('range-from').addEventListener('change', () => { renderConsumptionChart(); updateTrackerKPIs(); });
+document.getElementById('range-to').addEventListener('change', () => { renderConsumptionChart(); updateTrackerKPIs(); });
+
 // Separator line toggle
 document.getElementById('chart-separator').addEventListener('change', (e) => {
     document.getElementById('separator-date-group').style.display = e.target.checked ? '' : 'none';
@@ -1399,8 +1481,29 @@ document.getElementById('chart-separator-date').addEventListener('change', () =>
 });
 
 // ============ TRACKER KPIs ============
+function filterSegmentsByRange(segments) {
+    const range = getDateRangeFilter();
+    if (!range.from && !range.to) return segments;
+    return segments.filter(seg => {
+        if (range.from && seg.toDate < range.from) return false;
+        if (range.to && seg.fromDate > range.to) return false;
+        return true;
+    }).map(seg => {
+        // Clip segments to range boundaries
+        let fromDate = seg.fromDate;
+        let toDate = seg.toDate;
+        if (range.from && fromDate < range.from) fromDate = range.from;
+        if (range.to && toDate > range.to) toDate = range.to;
+        const d1 = new Date(fromDate);
+        const d2 = new Date(toDate);
+        const days = Math.max(1, (d2 - d1) / (1000 * 60 * 60 * 24));
+        return { ...seg, fromDate, toDate, days, consumption: seg.dailyRate * days };
+    });
+}
+
 function updateTrackerKPIs() {
-    const segments = calcConsumptionSegments();
+    const allSegments = calcConsumptionSegments();
+    const segments = filterSegmentsByRange(allSegments);
 
     const kpiAvg = document.getElementById('kpi-avg-yearly');
     const kpiTrend = document.getElementById('kpi-trend');
@@ -1423,14 +1526,18 @@ function updateTrackerKPIs() {
 
     kpiAvg.textContent = `${avgYearlyConsumption.toLocaleString('de-DE')} kWh`;
 
-    // Trend: compare last 90 days vs overall average
+    // Trend: compare last 90 days vs overall average (uses all data, not filtered)
+    const allTotal = allSegments.reduce((sum, s) => sum + s.consumption, 0);
+    const allDays = allSegments.reduce((sum, s) => sum + s.days, 0);
+    const allAvgDaily = allDays > 0 ? allTotal / allDays : 0;
+
     const now = new Date();
     const ninetyDaysAgo = new Date(now);
     ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
 
     let recentConsumption = 0;
     let recentDays = 0;
-    segments.forEach(seg => {
+    allSegments.forEach(seg => {
         const segStart = new Date(seg.fromDate);
         const segEnd = new Date(seg.toDate);
         const overlapStart = new Date(Math.max(segStart, ninetyDaysAgo));
@@ -1443,9 +1550,9 @@ function updateTrackerKPIs() {
         }
     });
 
-    if (recentDays > 30) {
+    if (recentDays > 30 && allAvgDaily > 0) {
         const recentDailyAvg = recentConsumption / recentDays;
-        const diffPercent = ((recentDailyAvg - avgDailyConsumption) / avgDailyConsumption) * 100;
+        const diffPercent = ((recentDailyAvg - allAvgDaily) / allAvgDaily) * 100;
 
         if (Math.abs(diffPercent) < 3) {
             kpiTrend.textContent = '→ Stabil';
@@ -1462,12 +1569,13 @@ function updateTrackerKPIs() {
         kpiTrend.className = 'kpi-value kpi-trend-stable';
     }
 
-    // Cost KPIs - use currently active contract
-    const activeContract = getActiveContract();
-    if (activeContract) {
-        const yearlyConsumptionCost = avgYearlyConsumption * (activeContract.kwhPrice / 100);
-        const yearlyBaseFee = activeContract.baseFee * 12;
-        const bonusPerDay = getBonusPerDay(activeContract);
+    // Cost KPIs - use currently active contract (or contract for filtered range)
+    const range = getDateRangeFilter();
+    const costContract = range.from ? getContractForDate(range.from) : getActiveContract();
+    if (costContract) {
+        const yearlyConsumptionCost = avgYearlyConsumption * (costContract.kwhPrice / 100);
+        const yearlyBaseFee = costContract.baseFee * 12;
+        const bonusPerDay = getBonusPerDay(costContract);
         const yearlyBonus = bonusPerDay * 365.25;
         const yearlyCost = yearlyConsumptionCost + yearlyBaseFee - yearlyBonus;
         const monthlyCost = yearlyCost / 12;

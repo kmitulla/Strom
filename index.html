@@ -198,10 +198,23 @@
                         <input type="checkbox" id="chart-cost-bars"> Kosten (€)
                     </label>
                     <label class="checkbox-label">
+                        <input type="checkbox" id="chart-trendline"> Trendlinie
+                    </label>
+                    <label class="checkbox-label">
                         <input type="checkbox" id="chart-separator"> Trennlinie
                     </label>
                     <div id="separator-date-group" class="input-group compact" style="display:none; margin-bottom:0;">
                         <input type="date" id="chart-separator-date" style="padding:0.4rem 0.6rem; font-size:0.85rem;">
+                    </div>
+                </div>
+                <div class="date-range-row">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="chart-custom-range"> Zeitraum
+                    </label>
+                    <div id="custom-range-group" class="date-range-inputs" style="display:none;">
+                        <input type="date" id="range-from" style="padding:0.4rem 0.6rem; font-size:0.85rem;">
+                        <span style="color:var(--text-secondary); font-size:0.85rem;">–</span>
+                        <input type="date" id="range-to" style="padding:0.4rem 0.6rem; font-size:0.85rem;">
                     </div>
                 </div>
                 <div class="chart-container">
